@@ -23,7 +23,7 @@ The VortexCoin blockchain provides an **API** for interaction with external appl
 #### Transaction System
 
 ```http
-  POST /transactions/{sender}/{receiver}/{amount}
+  POST /transactions/
 ```
 
 | Parameters   | Variable Type       | Description                          |
@@ -31,6 +31,7 @@ The VortexCoin blockchain provides an **API** for interaction with external appl
 | `sender` | `string` | Transaction Sender |
 | `receiver` |`string` | Transaction Receiver |
 | `amount` | `double` | Amount |
+| `signature` | `string` | Transaction Signature |
 
 
 #### Full Blockchain Return
