@@ -1,26 +1,59 @@
 #include "blockchain.h"
+#include <fstream>
+#include <set>
+
+using namespace std;
+
+// Helper function to check if the signature exists in keys file
+bool isSignatureValid(const string& signature) {
+    ifstream file("keys");
+    if (!file.is_open()) {
+        cout << "[ERROR] 'keys' file not found." << endl;
+        return false;
+    }
+
+    string line;
+    while (getline(file, line)) {
+        if (line == signature) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // Block constructor
-Block::Block(string prevHash) : previousHash(prevHash) {
-    cout << "Creating new block with previous hash: " << prevHash << endl;
+Block::Block(string prevHash) : previousHash(prevHash), isDirty(true) {
+    cout << "[INFO] Creating new block with previous hash: " << prevHash << endl;
     hash = calculateHash();
-    cout << "New block hash: " << hash << endl;
+    cout << "[INFO] New block hash: " << hash << endl;
 }
 
 // Add transaction to the block
-void Block::addTransaction(string sender, string receiver, double amount) {
-    cout << "Adding transaction: " << sender << " -> " << receiver << " : " << amount << endl;
-    transactions.push_back({sender, receiver, amount});
-    hash = calculateHash(); // Recalculate hash after modification
-    cout << "Updated block hash: " << hash << endl;
+void Block::addTransaction(const string& sender, const string& receiver, double amount, const string& signature) {
+    cout << "[INFO] Adding transaction: " << sender << " -> " << receiver << " : " << amount << endl;
+
+    // Verify balance
+    Blockchain blockchain;
+    double senderBalance = blockchain.getBalance(sender);
+    if (sender != "SYSTEM" && senderBalance < amount) {
+        cout << "[ERROR] Insufficient balance for transaction from " << sender << endl;
+        return;
+    }
+
+    if (!isSignatureValid(signature)) {
+        cout << "[ERROR] Invalid transaction signature." << endl;
+        return;
+    }
+
+    transactions.push_back({sender, receiver, amount, signature});
+    isDirty = true; // Mark block as modified
 }
 
 // Add data to the block
-void Block::addData(string app_id, string data) {
-    cout << "Adding data to block: App ID: " << app_id << " | Data: " << data << endl;
+void Block::addData(const string& app_id, const string& data) {
+    cout << "[INFO] Adding data to block: App ID: " << app_id << " | Data: " << data << endl;
     this->data.push_back({app_id, data});
-    hash = calculateHash(); // Recalculate hash after modification
-    cout << "Updated block hash: " << hash << endl;
+    isDirty = true; // Mark block as modified
 }
 
 // Compute block hash by concatenating its information
@@ -28,8 +61,17 @@ string Block::calculateHash() const {
     stringstream ss;
     ss << previousHash;
     for (const auto& d : data) ss << d.app_id << d.data;
-    for (const auto& t : transactions) ss << t.sender << t.receiver << t.amount;
+    for (const auto& t : transactions) ss << t.sender << t.receiver << t.amount << t.signature;
     return sha256(ss.str());
+}
+
+// Get cached hash or recalculate if dirty
+string Block::getHash() const {
+    if (isDirty) {
+        hash = calculateHash();
+        isDirty = false;
+    }
+    return hash;
 }
 
 // SHA-256 function to generate the hash
@@ -52,14 +94,25 @@ json Block::toJSON() const {
     j["data"] = json::array();
     for (const auto& d : data) j["data"].push_back({{"app_id", d.app_id}, {"data", d.data}});
     j["transactions"] = json::array();
-    for (const auto& t : transactions) j["transactions"].push_back({{"sender", t.sender}, {"receiver", t.receiver}, {"amount", t.amount}});
+    for (const auto& t : transactions) j["transactions"].push_back({{"sender", t.sender}, {"receiver", t.receiver}, {"amount", t.amount}, {"signature", t.signature}});
     return j;
+}
+
+// Blockchain constructor
+Blockchain::Blockchain() {
+    ifstream file("blockchain.json");
+    if (file.good()) {
+        loadFromFile("blockchain.json");
+    } else {
+        cout << "[INFO] Initializing blockchain with the genesis block..." << endl;
+        chain.emplace_back("0");
+    }
 }
 
 // Blockchain Validation System
 bool Blockchain::isChainValid() const {
     if (chain.empty()) {
-        std::cout << "Blockchain is empty." << std::endl;
+        cout << "[ERROR] Blockchain is empty." << endl;
         return false;
     }
 
@@ -67,58 +120,49 @@ bool Blockchain::isChainValid() const {
         const Block& currentBlock = chain[i];
         const Block& previousBlock = chain[i - 1];
 
-        // Verifica se o hash do bloco atual está correto
         if (currentBlock.getHash() != currentBlock.calculateHash()) {
-            std::cerr << "Block " << i << " has an invalid hash!" << std::endl;
+            cerr << "[ERROR] Block " << i << " has an invalid hash!" << endl;
             return false;
         }
 
-        // Verifica se o previousHash está correto
         if (currentBlock.getPreviousHash() != previousBlock.getHash()) {
-            std::cerr << "Block " << i << " has an incorrect previous hash!" << std::endl;
+            cerr << "[ERROR] Block " << i << " has an incorrect previous hash!" << endl;
             return false;
         }
     }
 
-    std::cout << "Blockchain is valid." << std::endl;
+    cout << "[INFO] Blockchain is valid." << endl;
     return true;
-}
-
-
-// Blockchain constructor, initializes with a genesis block
-Blockchain::Blockchain() {
-    cout << "Initializing blockchain with the genesis block..." << endl;
-    chain.emplace_back("0");
 }
 
 // Add a new empty block to the blockchain
 void Blockchain::addBlock() {
-    cout << "Adding new block..." << endl;
-    chain.emplace_back(chain.back().hash);
+    cout << "[INFO] Adding new block..." << endl;
+    chain.emplace_back(chain.back().getHash());
     saveToFile("blockchain.json");
 }
 
 // Add transaction to the last block
-void Blockchain::addTransaction(string sender, string receiver, double amount) {
+void Blockchain::addTransaction(const string& sender, const string& receiver, double amount, const string& signature) {
     if (!chain.empty()) {
-        cout << "Adding transaction to last block..." << endl;
-        chain.back().addTransaction(sender, receiver, amount);
-	saveToFile("blockchain.json");
+        cout << "[INFO] Adding transaction to last block..." << endl;
+        chain.back().addTransaction(sender, receiver, amount, signature);
+        saveToFile("blockchain.json");
     }
 }
 
 // Add data to the last block
-void Blockchain::addData(string app_id, string data) {
+void Blockchain::addData(const string& app_id, const string& data) {
     if (!chain.empty()) {
-        cout << "Adding data to last block..." << endl;
+        cout << "[INFO] Adding data to last block..." << endl;
         chain.back().addData(app_id, data);
-	saveToFile("blockchain.json");
+        saveToFile("blockchain.json");
     }
 }
 
 // Display the current blockchain state
-void Blockchain::printChain() {
-    cout << "\nCurrent Blockchain State:" << endl;
+void Blockchain::printChain() const {
+    cout << "\n[INFO] Current Blockchain State:" << endl;
     for (const auto& block : chain) {
         cout << block.toJSON().dump(4) << endl;
         cout << "----------------------" << endl;
@@ -126,54 +170,62 @@ void Blockchain::printChain() {
 }
 
 // Save blockchain to JSON file
-void Blockchain::saveToFile(const string& filename) {
+void Blockchain::saveToFile(const string& filename) const {
     json j;
     j["chain"] = json::array();
     for (const auto& block : chain) j["chain"].push_back(block.toJSON());
     ofstream file(filename);
     file << j.dump(4);
     file.close();
-    cout << "Blockchain saved to " << filename << endl;
+    cout << "[INFO] Blockchain saved to " << filename << endl;
 }
 
 // Load blockchain from JSON file
 void Blockchain::loadFromFile(const string& filename) {
     ifstream file(filename);
     if (!file.is_open()) {
-        cout << "Failed to open file: " << filename << endl;
+        cout << "[ERROR] Failed to open file: " << filename << endl;
         return;
     }
     json j;
     file >> j;
     file.close();
     chain.clear();
+
     for (const auto& blk : j["chain"]) {
         Block b(blk["previousHash"]);
-        b.hash = blk["hash"];
-        for (const auto& d : blk["data"]) b.data.push_back({d["app_id"], d["data"]});
-        for (const auto& t : blk["transactions"]) b.transactions.push_back({t["sender"], t["receiver"], t["amount"]});
+        b.hash = b.calculateHash();
+        if (b.hash != blk["hash"]) {
+            cout << "[ERROR] Data integrity check failed for a block!" << endl;
+            return;
+        }
+
+        if (blk.contains("data")) {
+            for (const auto& d : blk["data"]) b.data.push_back({d["app_id"], d["data"]});
+        }
+
+        if (blk.contains("transactions")) {
+            for (const auto& t : blk["transactions"]) b.transactions.push_back({t["sender"], t["receiver"], t["amount"], t["signature"]});
+        }
+
         chain.push_back(b);
     }
-    cout << "Blockchain loaded from " << filename << endl;
+    cout << "[INFO] Blockchain loaded from " << filename << endl;
 }
 
 // Get balance for Wallet
 double Blockchain::getBalance(const string& wallet_id) const {
     double balance = 0.0;
-
-    // Iterate through each block and its transactions
     for (const auto& block : chain) {
         for (const auto& transaction : block.transactions) {
-            // If the wallet is the sender, subtract the amount
             if (transaction.sender == wallet_id) {
                 balance -= transaction.amount;
             }
-            // If the wallet is the receiver, add the amount
             if (transaction.receiver == wallet_id) {
                 balance += transaction.amount;
             }
         }
     }
-
     return balance;
 }
+
