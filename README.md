@@ -1,4 +1,4 @@
-# VortexCoin ($VOR)
+# VortexCoin ($VOX)
 
 ### Core Library --- Source-Code
 This software represents **the main core of the VortexCoin** project, written in *C++* 
